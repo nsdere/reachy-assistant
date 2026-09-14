@@ -2,6 +2,9 @@
 
 Home voice assistant. Three modes, one box.
 
+**Starting or resuming work? Read [NEXT.md](NEXT.md).** It carries the install
+steps, what is left to build, and the rules that must not be quietly undone.
+
 | Wake word | Mode | What leaves the house |
 |---|---|---|
 | `Mando live` | GPT-Live conversation | live audio |
