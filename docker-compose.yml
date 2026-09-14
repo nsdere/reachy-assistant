@@ -1,0 +1,40 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: reachy-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST API + web UI at /dashboard
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # OpenAI-compatible local STT server (project was renamed from
+  # "faster-whisper-server" to "speaches" — this is the current image).
+  # POST /v1/audio/transcriptions, model chosen per-request
+  # (e.g. "Systran/faster-whisper-small").
+  whisper:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    container_name: reachy-whisper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - whisper_cache:/home/ubuntu/.cache/huggingface/hub
+
+  # Wyoming-protocol local TTS server (Piper). Talk to it with a Wyoming
+  # client (python `wyoming` package) from the orchestrator, not plain HTTP.
+  piper:
+    image: rhasspy/wyoming-piper
+    container_name: reachy-piper
+    restart: unless-stopped
+    command: --voice en_US-lessac-medium
+    ports:
+      - "10200:10200"
+    volumes:
+      - piper_data:/data
+
+volumes:
+  qdrant_data:
+  whisper_cache:
+  piper_data:
