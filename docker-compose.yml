@@ -1,0 +1,47 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  orchestrator:
+    build: ./orchestrator
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_URL: http://ollama:11434
+    volumes:
+      - ./data:/data
+    depends_on:
+      - qdrant
+      - ollama
+
+  voice:
+    build: ./voice
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment:
+      MODELS_DIR: /models
+    volumes:
+      - voice_models:/models
+
+volumes:
+  qdrant_data:
+  ollama_data:
+  voice_models:
