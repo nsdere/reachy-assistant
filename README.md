@@ -9,7 +9,7 @@ steps, what is left to build, and the rules that must not be quietly undone.
 |---|---|---|
 | `Mando live` | GPT-Live conversation | live audio |
 | `Hey Mando` | one-shot question | transcribed text only |
-| `Saturn` | private | nothing |
+| private wake word | private | nothing |
 
 Private data (WhatsApp, personal documents, calendar) lives in a separate Qdrant
 collection that cloud-facing code has no function to reach — see
