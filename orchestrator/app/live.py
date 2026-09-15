@@ -20,17 +20,23 @@ from .audio import LIVE_RATE, from_live, to_live
 from .config import settings
 
 # --- wire protocol ----------------------------------------------------------
-# These strings follow OpenAI's realtime event protocol, which GPT-Live shares.
-# The model reference states GPT-Live-1 is served from v1/live rather than
-# v1/realtime, so check these against the Live reference before the first billed
-# run - LIVE_URL is already overridable from .env. Nothing else in this file
-# depends on the exact spelling.
-SESSION_UPDATE = "session.update"
-AUDIO_APPEND = "input_audio_buffer.append"
-AUDIO_DELTA = "response.output_audio.delta"
-SPEECH_STARTED = "input_audio_buffer.speech_started"
-FUNCTION_CALL_DONE = "response.function_call_arguments.done"
-ITEM_CREATE = "conversation.item.create"
+# GPT-Live is its own endpoint (v1/live/sessions), not the older Realtime API
+# (v1/realtime) - the two do not share an event vocabulary. GPT-Live itself
+# only does voice I/O; reasoning and tool calls are delegated to a backend
+# Responses model (session.delegation.type = "responses"), whose function
+# calls arrive wrapped in a response.event envelope. Confirm this against the
+# current GPT-Live reference before the first billed run - model names and
+# event shapes are the two things most likely to have moved since this was
+# written. Nothing else in this file depends on the exact spelling.
+SESSION_START = "session.start"
+SESSION_STARTED = "session.started"
+SESSION_CLOSED = "session.closed"
+AUDIO_APPEND = "session.input_audio.append"
+AUDIO_DELTA = "session.output_audio.delta"
+INPUT_TRANSCRIPT_DELTA = "session.input_transcript.delta"
+RESPONSE_EVENT = "response.event"
+OUTPUT_ITEM_DONE = "response.output_item.done"
+RESPONSE_ITEM_CREATE = "response.item.create"
 RESPONSE_CREATE = "response.create"
 ERROR = "error"
 # ---------------------------------------------------------------------------
@@ -59,23 +65,25 @@ SEARCH_TOOL = {
 
 def _session_config() -> dict:
     return {
-        "type": SESSION_UPDATE,
+        "type": SESSION_START,
         "session": {
-            "type": "realtime",
             "model": settings.live_model,
-            "output_modalities": ["audio"],
+            "instructions": INSTRUCTIONS,
             "audio": {
-                "input": {
-                    "format": {"type": "audio/pcm", "rate": LIVE_RATE},
-                    "turn_detection": {"type": "semantic_vad"},
-                },
-                "output": {
-                    "format": {"type": "audio/pcm"},
-                    "voice": settings.live_voice,
+                "output": {"voice": settings.live_voice},
+                "format": "pcm16",
+            },
+            # search_public_docs is declared on the backend Responses model,
+            # not on the voice model itself - GPT-Live has no tools of its own.
+            "delegation": {
+                "type": "responses",
+                "responses": {
+                    "model": settings.live_delegate_model,
+                    "instructions": INSTRUCTIONS,
+                    "tools": [SEARCH_TOOL],
+                    "tool_choice": "auto",
                 },
             },
-            "instructions": INSTRUCTIONS,
-            "tools": [SEARCH_TOOL],
         },
     }
 
@@ -116,30 +124,44 @@ class Session:
                 self.last_voice = time.monotonic()
                 await self.client.send_bytes(from_live(base64.b64decode(event["delta"])))
 
-            elif kind == SPEECH_STARTED:
+            elif kind == INPUT_TRANSCRIPT_DELTA:
+                # No dedicated speech-start/VAD event is documented for
+                # GPT-Live; a transcript fragment is the closest signal that
+                # the user is actively talking, so the idle watchdog treats
+                # it the same as outgoing audio.
                 self.last_voice = time.monotonic()
 
-            elif kind == FUNCTION_CALL_DONE:
-                await self._answer_search(live, event)
+            elif kind == RESPONSE_EVENT:
+                await self._handle_response_event(live, event.get("event") or {})
+
+            elif kind == SESSION_CLOSED:
+                self.reason = event.get("reason") or self.reason
+                return
 
             elif kind == ERROR:
                 self.reason = f"api error: {event.get('error', {}).get('message', '?')}"
                 return
 
-    async def _answer_search(self, live, event: dict) -> None:
-        if event.get("name") != SEARCH_TOOL["name"]:
+    async def _handle_response_event(self, live, nested: dict) -> None:
+        if nested.get("type") != OUTPUT_ITEM_DONE:
             return
-        query = json.loads(event.get("arguments") or "{}").get("query", "")
+        item = nested.get("item") or {}
+        if item.get("type") != "function_call" or item.get("name") != SEARCH_TOOL["name"]:
+            return
+        await self._answer_search(live, item)
+
+    async def _answer_search(self, live, item: dict) -> None:
+        query = json.loads(item.get("arguments") or "{}").get("query", "")
         passages = await vectors.search_public(query)
         self.searches += 1
 
         await live.send(
             json.dumps(
                 {
-                    "type": ITEM_CREATE,
+                    "type": RESPONSE_ITEM_CREATE,
                     "item": {
                         "type": "function_call_output",
-                        "call_id": event.get("call_id"),
+                        "call_id": item.get("call_id"),
                         "output": json.dumps({"passages": passages}),
                     },
                 }
@@ -168,6 +190,14 @@ async def run(client) -> dict:
             settings.live_url, additional_headers=headers
         ) as live:
             await live.send(json.dumps(_session_config()))
+
+            # Wait for the server to confirm the session before telling the
+            # local client it can start streaming audio.
+            ack = json.loads(await live.recv())
+            if ack.get("type") != SESSION_STARTED:
+                reason = ack.get("error", {}).get("message") or ack.get("type") or "?"
+                raise RuntimeError(f"session did not start: {reason}")
+
             await client.send_json({"type": "started"})
 
             tasks = [
