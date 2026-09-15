@@ -5,9 +5,16 @@ Robot-audio equivalent of talk.sh (which uses the server's own sound card).
 This is a Phase 3 test path pending the wake-word client in Phase 5, same as
 talk.sh - it just swaps the hardware source.
 
-    ./scripts/talk_reachy.py --robot-host 192.168.1.212               private mode, 6s
+    ./scripts/talk_reachy.py --robot-host 192.168.1.212               private mode
     ./scripts/talk_reachy.py --robot-host 192.168.1.212 --mode public
-    ./scripts/talk_reachy.py --robot-host 192.168.1.212 --seconds 10
+    ./scripts/talk_reachy.py --robot-host 192.168.1.212 --silence-seconds 1.5
+
+Recording length is dynamic: it starts on the first loud-enough chunk and
+stops --silence-seconds after the last one, capped at --max-seconds. This is
+an energy-threshold VAD on the raw samples, not the robot'"'"'s hardware DoA -
+get_DoA() needs direct USB access to the XMOS chip and returns None over a
+network/WebRTC connection, so it is not usable from a remote client like this
+one.
 """
 
 import argparse
@@ -24,17 +31,37 @@ from reachy_mini import ReachyMini
 ROBOT_RATE = 16_000
 
 
-def record(mini, seconds: float) -> bytes:
+def record(
+    mini,
+    max_seconds: float,
+    silence_seconds: float,
+    speech_threshold: float,
+) -> bytes:
+    """Record from first loud-enough chunk until silence_seconds of quiet after it.
+
+    Capped at max_seconds total even if speech never clearly starts or stops.
+    """
     mini.media.start_recording()
     try:
         chunks = []
-        t0 = time.monotonic()
-        while time.monotonic() - t0 < seconds:
+        t_start = time.monotonic()
+        speech_started = False
+        last_voice_time = t_start
+        while time.monotonic() - t_start < max_seconds:
             samples = mini.media.get_audio_sample()
-            if samples is not None and len(samples) > 0:
-                chunks.append(samples)
-            else:
+            if samples is None or len(samples) == 0:
                 time.sleep(0.01)
+                continue
+            chunks.append(samples)
+
+            mono = samples.mean(axis=1) if samples.ndim > 1 else samples
+            rms = float(np.sqrt(np.mean(np.square(mono)))) if mono.size else 0.0
+            now = time.monotonic()
+            if rms > speech_threshold:
+                speech_started = True
+                last_voice_time = now
+            if speech_started and (now - last_voice_time) > silence_seconds:
+                break
     finally:
         mini.media.stop_recording()
 
@@ -80,7 +107,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--robot-host", required=True, help="Reachy Mini address")
     parser.add_argument("--mode", choices=("private", "public"), default="private")
-    parser.add_argument("--seconds", type=float, default=6.0)
+    parser.add_argument("--max-seconds", type=float, default=15.0, help="Hard cap on recording length")
+    parser.add_argument("--silence-seconds", type=float, default=1.0, help="Stop this long after the last loud chunk")
+    parser.add_argument("--speech-threshold", type=float, default=0.02, help="RMS level (0-1) counted as speech, not silence")
     parser.add_argument("--volume", type=float, default=6.0)
     parser.add_argument("--orchestrator-url", default="http://localhost:8000")
     parser.add_argument("--voice-url", default="http://localhost:8001")
@@ -91,12 +120,16 @@ def main() -> int:
     with ReachyMini(
         host=args.robot_host, connection_mode="network", media_backend="webrtc"
     ) as mini:
-        print(f"[{args.mode}] listening for {args.seconds}s...")
-        wav_bytes = record(mini, args.seconds)
+        print(f"[{args.mode}] listening (up to {args.max_seconds:.0f}s, stops {args.silence_seconds:.1f}s after you go quiet)...")
+        t_record0 = time.perf_counter()
+        wav_bytes = record(mini, args.max_seconds, args.silence_seconds, args.speech_threshold)
+        t_record = time.perf_counter() - t_record0
+        print(f"heard {t_record:.1f}s of audio")
         if not wav_bytes:
             print("heard nothing - check the robot mic", file=sys.stderr)
             return 1
 
+        t0 = time.perf_counter()
         r = requests.post(
             f"{args.voice_url}/transcribe",
             data=wav_bytes,
@@ -104,31 +137,44 @@ def main() -> int:
             timeout=180,
         )
         r.raise_for_status()
+        t_transcribe = time.perf_counter() - t0
         question = r.json()["text"]
         if not question:
             print("heard nothing (empty transcript)", file=sys.stderr)
             return 1
         print(f"you:       {question}")
 
+        t0 = time.perf_counter()
         r = requests.post(
             f"{args.orchestrator_url}/{endpoint}",
             json={"question": question},
             timeout=180,
         )
         r.raise_for_status()
+        t_ask = time.perf_counter() - t0
         reply = r.json()
         print(f"{reply.get('source')}: {reply.get('answer')}")
 
+        t0 = time.perf_counter()
         r = requests.post(
             f"{args.voice_url}/speak",
             json={"text": reply["answer"]},
             timeout=180,
         )
         r.raise_for_status()
+        t_speak = time.perf_counter() - t0
 
         print("playing answer...")
+        t0 = time.perf_counter()
         play(mini, r.content, args.volume)
+        t_play = time.perf_counter() - t0
         print("done")
+
+        print(
+            f"\ntiming: record={t_record:.2f}s transcribe={t_transcribe:.2f}s "
+            f"llm_ask={t_ask:.2f}s speak={t_speak:.2f}s playback={t_play:.2f}s "
+            f"total={t_record + t_transcribe + t_ask + t_speak + t_play:.2f}s"
+        )
 
     return 0
 
