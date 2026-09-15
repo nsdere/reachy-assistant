@@ -67,11 +67,15 @@ class ReachyAudio:
     robot, so the model does not hear itself through the mic.
     """
 
-    def __init__(self, host: str | None = None) -> None:
+    def __init__(self, host: str | None = None, volume: float = 1.0) -> None:
         from reachy_mini import ReachyMini
 
-        kwargs = {"media_backend": "webrtc"} if host else {}
+        kwargs = {"media_backend": "webrtc"}
+        if host:
+            kwargs["host"] = host
+            kwargs["connection_mode"] = "network"
         self.mini = ReachyMini(**kwargs)
+        self.volume = volume
 
     def __enter__(self):
         self.mini.__enter__()
@@ -93,6 +97,8 @@ class ReachyAudio:
 
     def write(self, pcm: bytes) -> None:
         samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        if self.volume != 1.0:
+            samples = np.clip(samples * self.volume, -1.0, 1.0)
         self.mini.media.push_audio_sample(samples.reshape(-1, 1))
 
 
@@ -132,9 +138,14 @@ async def main() -> int:
     parser.add_argument("--url", default="ws://localhost:8000/live")
     parser.add_argument("--source", choices=("local", "reachy"), default="local")
     parser.add_argument("--robot-host", default=None, help="Reachy Mini address")
+    parser.add_argument("--volume", type=float, default=6.0, help="Output gain multiplier for the robot speaker (e.g. 2.0 = louder)")
     args = parser.parse_args()
 
-    audio = LocalAudio() if args.source == "local" else ReachyAudio(args.robot_host)
+    audio = (
+        LocalAudio()
+        if args.source == "local"
+        else ReachyAudio(args.robot_host, volume=args.volume)
+    )
 
     stop = asyncio.Event()
     with contextlib.suppress(NotImplementedError):

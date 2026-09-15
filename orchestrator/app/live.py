@@ -70,8 +70,8 @@ def _session_config() -> dict:
             "model": settings.live_model,
             "instructions": INSTRUCTIONS,
             "audio": {
+                "format": {"type": "audio/pcm", "rate": LIVE_RATE},
                 "output": {"voice": settings.live_voice},
-                "format": "pcm16",
             },
             # search_public_docs is declared on the backend Responses model,
             # not on the voice model itself - GPT-Live has no tools of its own.
