@@ -109,7 +109,7 @@ def main() -> int:
     parser.add_argument("--mode", choices=("private", "public"), default="private")
     parser.add_argument("--max-seconds", type=float, default=15.0, help="Hard cap on recording length")
     parser.add_argument("--silence-seconds", type=float, default=1.0, help="Stop this long after the last loud chunk")
-    parser.add_argument("--speech-threshold", type=float, default=0.02, help="RMS level (0-1) counted as speech, not silence")
+    parser.add_argument("--speech-threshold", type=float, default=0.01, help="RMS level (0-1) counted as speech, not silence")
     parser.add_argument("--volume", type=float, default=6.0)
     parser.add_argument("--orchestrator-url", default="http://localhost:8000")
     parser.add_argument("--voice-url", default="http://localhost:8001")
