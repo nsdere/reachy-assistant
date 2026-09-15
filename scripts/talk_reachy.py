@@ -120,7 +120,8 @@ def main() -> int:
     with ReachyMini(
         host=args.robot_host, connection_mode="network", media_backend="webrtc"
     ) as mini:
-        print(f"[{args.mode}] listening (up to {args.max_seconds:.0f}s, stops {args.silence_seconds:.1f}s after you go quiet)...")
+        print(f"[{args.mode}] listening (up to {args.max_seconds:.0f}s, stops {args.silence_seconds:.1f}s after you go quiet)...", flush=True)
+        print("RECORDING_STARTED", flush=True)
         t_record0 = time.perf_counter()
         wav_bytes = record(mini, args.max_seconds, args.silence_seconds, args.speech_threshold)
         t_record = time.perf_counter() - t_record0
