@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     live_delegate_model: str = "gpt-5.6-terra"
     live_idle_seconds: int = 25
     live_cost_per_minute: float = 0.05
-    local_model: str = "qwen3:4b"
+    local_model: str = "qwen3:1.7b"
     embed_model: str = "nomic-embed-text"
 
     daily_budget_usd: float = 1.00

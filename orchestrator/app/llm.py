@@ -44,6 +44,7 @@ async def ask_local(question: str, context: list[str], history: list[dict]) -> s
             json={
                 "model": settings.local_model,
                 "stream": False,
+                "think": False,
                 "messages": [
                     {"role": "system", "content": PROMPT},
                     *history,
