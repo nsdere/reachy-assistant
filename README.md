@@ -97,6 +97,24 @@ default to `Hey Mando` and save live mode for real conversations. `DAILY_BUDGET_
 in `.env` is the hard ceiling; when it is spent, the public path answers locally
 instead of refusing — same documents, slower model.
 
+## Always on: Hey Mando through the robot
+
+`scripts/mando_listen.py` keeps Reachy Mini listening. Every utterance is
+transcribed locally; only one that starts with "Hey Mando" goes on to `/ask`,
+so the cloud hears your questions and nothing else in the room. Pause after
+the wake phrase if you like, and keep asking follow-ups for a few seconds
+after each answer without repeating it.
+
+```bash
+~/reachy_mini_env/bin/python scripts/mando_listen.py --robot-host 192.168.1.212 --verbose
+```
+
+To run it at boot, install `scripts/mando-listen.service` as a user service
+(steps at the top of that file) and follow it with
+`journalctl --user -u mando-listen -f`. The robot SDK on this box must match
+the robot daemon version - a mismatch leaves the mic silent after the first
+half second.
+
 ## Talking to it
 
 Needs a microphone on the server plus `sudo apt install -y alsa-utils jq`.
