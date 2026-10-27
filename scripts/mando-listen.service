@@ -1,0 +1,28 @@
+# Always-on "Hey Mando" through Reachy Mini, as a systemd *user* service.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/mando-listen.service ~/.config/systemd/user/
+#   loginctl enable-linger          # start at boot without a login
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now mando-listen
+#
+#   journalctl --user -u mando-listen -f     # watch it
+#
+# Restart=always also covers the robot being off or rebooting: the client
+# exits when it cannot reach the daemon and is retried every 10 s.
+
+[Unit]
+Description=Hey Mando - always-on voice assistant through Reachy Mini
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/reachy-assistant
+Environment=PYTHONUNBUFFERED=1
+# webrtcsrc for the robot's audio lives in the gst-plugins-rs build, not the distro.
+Environment=GST_PLUGIN_PATH=/opt/gst-plugins-rs/lib/x86_64-linux-gnu/gstreamer-1.0
+ExecStart=%h/reachy_mini_env/bin/python scripts/mando_listen.py --robot-host 192.168.1.212
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -7,7 +7,13 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    # "Hey Mando". cloud_provider is "openai" or "anthropic"; the per-million
+    # token prices feed the daily budget, so keep them in step with cloud_model.
+    cloud_provider: str = "anthropic"
     cloud_model: str = "claude-haiku-4-5"
+    cloud_reasoning_effort: str = "low"
+    cloud_input_per_mtok: float = 1.0
+    cloud_output_per_mtok: float = 5.0
 
     # "Mando live". LIVE_URL is overridable because the endpoint spelling is the
     # one thing in app/live.py worth double-checking against the current docs.
